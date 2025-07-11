@@ -1,33 +1,73 @@
-#if os(iOS)
+// Standalone helper to use HEIC snapshots with SnapshotTesting
+// Copy this file into your test target to use the `.imageHEIC` strategies
+
+import Foundation
 import UIKit
-import XCTest
 import SnapshotTesting
 
+// MARK: - HEIC Compression Quality
+public enum CompressionQuality: Hashable, RawRepresentable {
+    case lossless
+    case low
+    case medium
+    case high
+    case maximum
+    case custom(CGFloat)
+
+    public init?(rawValue: CGFloat) {
+        switch rawValue {
+        case 1.0: self = .lossless
+        case 0.8: self = .low
+        case 0.5: self = .medium
+        case 0.2: self = .high
+        case 0.0: self = .maximum
+        default: self = .custom(rawValue)
+        }
+    }
+
+    public var rawValue: CGFloat {
+        switch self {
+        case .lossless: return 1.0
+        case .low: return 0.8
+        case .medium: return 0.5
+        case .high: return 0.2
+        case .maximum: return 0.0
+        case let .custom(value): return value
+        }
+    }
+}
+
+// MARK: - UIImage HEIC helper
+@available(iOSApplicationExtension 11.0, *)
+private extension UIImage {
+    func heicData(compressionQuality: CGFloat) -> Data? {
+        let data = NSMutableData()
+        guard
+            let imageDestination = CGImageDestinationCreateWithData(
+                data, AVFileType.heic as CFString, 1, nil),
+            let cgImage = cgImage
+        else { return nil }
+
+        let options: NSDictionary? = compressionQuality >= 1 ? nil : [
+            kCGImageDestinationLossyCompressionQuality: compressionQuality
+        ]
+        CGImageDestinationAddImage(imageDestination, cgImage, options)
+        guard CGImageDestinationFinalize(imageDestination) else { return nil }
+        return data as Data
+    }
+}
+
+// MARK: - Diffing + Snapshotting for UIImage
 public extension Diffing where Value == UIImage {
-    /// A pixel-diffing strategy for UIImage's which requires a 100% match.
     static let imageHEIC = Diffing.imageHEIC()
-    
-    /// A pixel-diffing strategy for UIImage that allows customizing how precise the matching must be.
-    ///
-    /// - Parameter precision: A value between 0 and 1, where 1 means the images must match 100% of their pixels.
-    /// - Parameter perceptualPrecision: The percentage a pixel must match the source pixel to be considered a match. [98-99% mimics the precision of the human eye.](http://zschuessler.github.io/DeltaE/learn/#toc-defining-delta-e)
-    /// - Parameter scale: Scale to use when loading the reference image from disk. If `nil` or the `UITraitCollection`s
-    /// default value of `0.0`, the screens scale is used.
-    /// - Parameter compressionQuality: The desired compression quality to use when writing to an image destination.
-    /// - Returns: A new diffing strategy.
+
     static func imageHEIC(
         precision: Float = 1,
         perceptualPrecision: Float = 1,
         scale: CGFloat? = nil,
         compressionQuality: CompressionQuality = .lossless
     ) -> Diffing {
-        let imageScale: CGFloat
-        if let scale = scale, scale != 0.0 {
-            imageScale = scale
-        } else {
-            imageScale = UIScreen.main.scale
-        }
-
+        let imageScale = (scale ?? UIScreen.main.scale == 0) ? UIScreen.main.scale : (scale ?? UIScreen.main.scale)
         let emptyHeicData: Data
         if #available(iOS 17.0, *) {
             emptyHeicData = emptyImage().heicData() ?? Data()
@@ -39,27 +79,23 @@ public extension Diffing where Value == UIImage {
             fromData: { UIImage(data: $0, scale: imageScale) ?? emptyImage() },
             diff: { old, new in
                 guard let message = compare(old, new,
-                                            precision: precision,
-                                            perceptualPrecision: perceptualPrecision,
-                                            compressionQuality: compressionQuality)
+                                             precision: precision,
+                                             perceptualPrecision: perceptualPrecision,
+                                             compressionQuality: compressionQuality)
                 else { return nil }
-
                 let difference = diffImage(old, new)
                 let oldAttachment = XCTAttachment(image: old)
                 oldAttachment.name = "reference"
                 let isEmptyImage = new.size == .zero
                 let newAttachment = XCTAttachment(image: isEmptyImage ? emptyImage() : new)
                 newAttachment.name = "failure"
-                let differenceAttachment = XCTAttachment(image: difference)
-                differenceAttachment.name = "difference"
-                return (
-                    message,
-                    [oldAttachment, newAttachment, differenceAttachment]
-                )
-            })
+                let diffAttachment = XCTAttachment(image: difference)
+                diffAttachment.name = "difference"
+                return (message, [oldAttachment, newAttachment, diffAttachment])
+            }
+        )
     }
-    
-    /// Used when the image size has no width or no height to generated the default empty image
+
     private static func emptyImage() -> UIImage {
         let label = UILabel(frame: CGRect(x: 0, y: 0, width: 400, height: 80))
         label.backgroundColor = .red
@@ -74,35 +110,28 @@ public extension Diffing where Value == UIImage {
 }
 
 public extension Snapshotting where Value == UIImage, Format == UIImage {
-    /// A snapshot strategy for comparing images based on pixel equality.
     static var imageHEIC: Snapshotting {
-        return .imageHEIC()
+        .imageHEIC()
     }
-    
-    /// A snapshot strategy for comparing images based on pixel equality.
-    ///
-    /// - Parameter precision: The percentage of pixels that must match.
-    /// - Parameter perceptualPrecision: The percentage a pixel must match the source pixel to be considered a match. [98-99% mimics the precision of the human eye.](http://zschuessler.github.io/DeltaE/learn/#toc-defining-delta-e)
-    /// - Parameter scale: The scale of the reference image stored on disk.
-    /// - Parameter compressionQuality: The desired compression quality to use when writing to an image destination.
+
     static func imageHEIC(
         precision: Float = 1,
         perceptualPrecision: Float = 1,
         scale: CGFloat? = nil,
         compressionQuality: CompressionQuality = .lossless
     ) -> Snapshotting {
-        return Snapshotting(
+        Snapshotting(
             pathExtension: "heic",
-            diffing: Diffing<UIImage>
-                .imageHEIC(precision: precision,
-                           perceptualPrecision: perceptualPrecision,
-                           scale: scale,
-                           compressionQuality: compressionQuality)
+            diffing: Diffing.imageHEIC(
+                precision: precision,
+                perceptualPrecision: perceptualPrecision,
+                scale: scale,
+                compressionQuality: compressionQuality
+            )
         )
     }
 }
 
-// remap snapshot & reference to same colorspace
 private let imageContextColorSpace = CGColorSpace(name: CGColorSpace.sRGB)
 private let imageContextBitsPerComponent = 8
 private let imageContextBytesPerPixel = 4
@@ -136,7 +165,6 @@ private func compare(
         if memcmp(oldData, newData, byteCount) == 0 { return nil }
     }
     var newerBytes = [UInt8](repeating: 0, count: byteCount)
-
     guard
         let heicData = new.heicData(compressionQuality: compressionQuality.rawValue),
         let newerCgImage = UIImage(data: heicData)?.cgImage,
@@ -186,7 +214,6 @@ private func context(for cgImage: CGImage, data: UnsafeMutableRawPointer? = nil)
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         )
     else { return nil }
-
     context.draw(cgImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
     return context
 }
@@ -202,14 +229,9 @@ private func diffImage(_ old: UIImage, _ new: UIImage) -> UIImage {
     UIGraphicsEndImageContext()
     return differenceImage
 }
-#endif
-
-#if os(iOS)
-import CoreImage.CIKernel
-import MetalPerformanceShaders
 
 @available(iOS 10.0, *)
-func perceptuallyCompare(_ old: CIImage, _ new: CIImage, pixelPrecision: Float, perceptualPrecision: Float) -> String? {
+private func perceptuallyCompare(_ old: CIImage, _ new: CIImage, pixelPrecision: Float, perceptualPrecision: Float) -> String? {
     let deltaOutputImage = old.applyingFilter("CILabDeltaE", parameters: ["inputImage2": new])
     let thresholdOutputImage: CIImage
     do {
@@ -253,13 +275,12 @@ func perceptuallyCompare(_ old: CIImage, _ new: CIImage, pixelPrecision: Float, 
     }
 }
 
-// Copied from https://developer.apple.com/documentation/coreimage/ciimageprocessorkernel
 @available(iOS 10.0, *)
-final class ThresholdImageProcessorKernel: CIImageProcessorKernel {
+private final class ThresholdImageProcessorKernel: CIImageProcessorKernel {
     static let inputThresholdKey = "thresholdValue"
     static let device = MTLCreateSystemDefaultDevice()
 
-    override class func process(with inputs: [CIImageProcessorInput]?, arguments: [String: Any]?, output: CIImageProcessorOutput) throws {
+    override class func process(with inputs: [CIImageProcessorInput]?, arguments: [String : Any]?, output: CIImageProcessorOutput) throws {
         guard
             let device = device,
             let commandBuffer = output.metalCommandBuffer,
@@ -269,14 +290,12 @@ final class ThresholdImageProcessorKernel: CIImageProcessorKernel {
             let thresholdValue = arguments?[inputThresholdKey] as? Float else {
             return
         }
-
         let threshold = MPSImageThresholdBinary(
             device: device,
             thresholdValue: thresholdValue,
             maximumValue: 1.0,
             linearGrayColorTransform: nil
         )
-
         threshold.encode(
             commandBuffer: commandBuffer,
             sourceTexture: sourceTexture,
@@ -284,9 +303,6 @@ final class ThresholdImageProcessorKernel: CIImageProcessorKernel {
         )
     }
 }
-#endif
-
-import UIKit
 
 extension UIView {
     func asImage() -> UIImage {
@@ -296,3 +312,130 @@ extension UIView {
         }
     }
 }
+
+// MARK: - Snapshotting for UIView and UIViewController
+public extension Snapshotting where Value == UIView, Format == UIImage {
+    static var imageHEIC: Snapshotting { .imageHEIC() }
+
+    static func imageHEIC(
+        drawHierarchyInKeyWindow: Bool = false,
+        precision: Float = 1,
+        perceptualPrecision: Float = 1,
+        size: CGSize? = nil,
+        traits: UITraitCollection = .init(),
+        compressionQuality: CompressionQuality = .lossless
+    ) -> Snapshotting {
+        let base = Snapshotting<UIView, UIImage>.image(
+            drawHierarchyInKeyWindow: drawHierarchyInKeyWindow,
+            precision: precision,
+            perceptualPrecision: perceptualPrecision,
+            size: size,
+            traits: traits
+        )
+        return Snapshotting<UIView, UIImage>(
+            pathExtension: "heic",
+            diffing: Diffing.imageHEIC(
+                precision: precision,
+                perceptualPrecision: perceptualPrecision,
+                scale: traits.displayScale,
+                compressionQuality: compressionQuality
+            ),
+            asyncSnapshot: base.snapshot
+        )
+    }
+}
+
+public extension Snapshotting where Value == UIViewController, Format == UIImage {
+    static var imageHEIC: Snapshotting { .imageHEIC() }
+
+    static func imageHEIC(
+        on config: ViewImageConfig,
+        precision: Float = 1,
+        perceptualPrecision: Float = 1,
+        size: CGSize? = nil,
+        traits: UITraitCollection = .init(),
+        compressionQuality: CompressionQuality = .lossless
+    ) -> Snapshotting {
+        let base = Snapshotting<UIViewController, UIImage>.image(
+            on: config,
+            precision: precision,
+            perceptualPrecision: perceptualPrecision,
+            size: size,
+            traits: traits
+        )
+        return Snapshotting<UIViewController, UIImage>(
+            pathExtension: "heic",
+            diffing: Diffing.imageHEIC(
+                precision: precision,
+                perceptualPrecision: perceptualPrecision,
+                scale: traits.displayScale,
+                compressionQuality: compressionQuality
+            ),
+            asyncSnapshot: base.snapshot
+        )
+    }
+
+    static func imageHEIC(
+        drawHierarchyInKeyWindow: Bool = false,
+        precision: Float = 1,
+        perceptualPrecision: Float = 1,
+        size: CGSize? = nil,
+        traits: UITraitCollection = .init(),
+        compressionQuality: CompressionQuality = .lossless
+    ) -> Snapshotting {
+        let base = Snapshotting<UIViewController, UIImage>.image(
+            drawHierarchyInKeyWindow: drawHierarchyInKeyWindow,
+            precision: precision,
+            perceptualPrecision: perceptualPrecision,
+            size: size,
+            traits: traits
+        )
+        return Snapshotting<UIViewController, UIImage>(
+            pathExtension: "heic",
+            diffing: Diffing.imageHEIC(
+                precision: precision,
+                perceptualPrecision: perceptualPrecision,
+                scale: traits.displayScale,
+                compressionQuality: compressionQuality
+            ),
+            asyncSnapshot: base.snapshot
+        )
+    }
+}
+
+#if canImport(SwiftUI)
+import SwiftUI
+@available(iOS 13.0, *)
+public extension Snapshotting where Value: SwiftUI.View, Format == UIImage {
+    static var imageHEIC: Snapshotting {
+        .imageHEIC()
+    }
+
+    static func imageHEIC(
+        drawHierarchyInKeyWindow: Bool = false,
+        precision: Float = 1,
+        perceptualPrecision: Float = 1,
+        layout: SwiftUISnapshotLayout = .sizeThatFits,
+        traits: UITraitCollection = .init(),
+        compressionQuality: CompressionQuality = .lossless
+    ) -> Snapshotting {
+        let base = Snapshotting<Value, UIImage>.image(
+            drawHierarchyInKeyWindow: drawHierarchyInKeyWindow,
+            precision: precision,
+            perceptualPrecision: perceptualPrecision,
+            layout: layout,
+            traits: traits
+        )
+        return Snapshotting<Value, UIImage>(
+            pathExtension: "heic",
+            diffing: Diffing.imageHEIC(
+                precision: precision,
+                perceptualPrecision: perceptualPrecision,
+                scale: traits.displayScale,
+                compressionQuality: compressionQuality
+            ),
+            asyncSnapshot: base.snapshot
+        )
+    }
+}
+#endif

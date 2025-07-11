@@ -7,7 +7,7 @@ import SwiftUI
 
 final class SnapshotTestingHEICTests: XCTestCase {
 
-#if os(iOS) || os(tvOS)
+#if os(iOS)
     var sut: TestViewController!
 
     override func setUp() {
@@ -95,29 +95,6 @@ final class SnapshotTestingHEICTests: XCTestCase {
                         compressionQuality: .custom(0.75)
                        )
         )
-    }
-#endif
-
-
-#if os(macOS)
-    func test_HEIC_NSView() {
-        // given
-        let view = NSView()
-        let button = NSButton()
-        // when
-        view.frame = CGRect(origin: .zero, size: CGSize(width: 400, height: 400))
-        view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.blue.cgColor
-        view.addSubview(button)
-        button.frame.origin = CGPoint(x: view.frame.origin.x + view.frame.size.width / 2.0,
-                                      y: view.frame.origin.y + view.frame.size.height / 2.0)
-        button.bezelStyle = .rounded
-        button.title = "Push Me"
-        button.wantsLayer = true
-        button.layer?.backgroundColor = NSColor.red.cgColor
-        button.sizeToFit()
-        // then
-        assertSnapshot(of: view, as: .imageHEIC)
     }
 #endif
 

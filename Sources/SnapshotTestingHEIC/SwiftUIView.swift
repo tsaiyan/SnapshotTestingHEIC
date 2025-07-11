@@ -9,8 +9,8 @@ import Foundation
 import SwiftUI
 @testable import SnapshotTesting
 
-#if os(iOS) || os(tvOS)
-@available(iOS 13.0, tvOS 13.0, *)
+#if os(iOS)
+@available(iOS 13.0, *)
 public extension Snapshotting where Value: SwiftUI.View, Format == UIImage {
 
     /// A snapshot strategy for comparing views based on pixel equality.
@@ -37,8 +37,8 @@ public extension Snapshotting where Value: SwiftUI.View, Format == UIImage {
     ) -> Snapshotting {
         let config: ViewImageConfig
 
-        switch layout {
-#if os(iOS) || os(tvOS)
+switch layout {
+#if os(iOS)
         case let .device(config: deviceConfig):
             config = deviceConfig
 #endif
