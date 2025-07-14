@@ -5,7 +5,7 @@
 //  Created by Emanuel Cunha on 19/05/2023.
 //
 
-#if os(iOS) || os(tvOS)
+#if os(iOS)
 import SwiftUI
 
 struct SwiftUIView: View {

@@ -1,8 +1,8 @@
-#if os(iOS) || os(tvOS)
+#if os(iOS)
 import AVFoundation
 import UIKit
 
-@available(tvOSApplicationExtension 11.0, *)
+@available(iOSApplicationExtension 11.0, *)
 extension UIImage {
     func heicData(compressionQuality: CGFloat) -> Data? {
         let data = NSMutableData()
