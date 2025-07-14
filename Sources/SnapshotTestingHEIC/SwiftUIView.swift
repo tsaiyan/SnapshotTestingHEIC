@@ -8,9 +8,21 @@
 import Foundation
 import SwiftUI
 @testable import SnapshotTesting
+import ObjectiveC
 
 #if os(iOS) || os(tvOS)
 @available(iOS 13.0, tvOS 13.0, *)
+private struct SwiftUIViewCacheKey: Hashable {
+    let typeName: String
+    let size: CGSize?
+}
+
+@available(iOS 13.0, tvOS 13.0, *)
+private enum SwiftUIViewCache {
+    static var images: [SwiftUIViewCacheKey: UIImage] = [:]
+    static let lock = NSLock()
+}
+
 public extension Snapshotting where Value: SwiftUI.View, Format == UIImage {
 
     /// A snapshot strategy for comparing views based on pixel equality.
@@ -71,14 +83,30 @@ public extension Snapshotting where Value: SwiftUI.View, Format == UIImage {
 
                 controller = hostingController
             }
+            let cacheKey = SwiftUIViewCacheKey(
+                typeName: String(describing: type(of: view)),
+                size: config.size
+            )
 
-            return snapshotView(
+            SwiftUIViewCache.lock.lock()
+            if let cached = SwiftUIViewCache.images[cacheKey] {
+                SwiftUIViewCache.lock.unlock()
+                return cached
+            }
+            SwiftUIViewCache.lock.unlock()
+
+            let image = snapshotView(
                 config: config.size.map { .init(safeArea: config.safeArea, size: $0, traits: config.traits) } ?? config,
                 drawHierarchyInKeyWindow: false,
                 traits: traits,
                 view: controller.view,
                 viewController: controller
             )
+
+            SwiftUIViewCache.lock.lock()
+            SwiftUIViewCache.images[cacheKey] = image
+            SwiftUIViewCache.lock.unlock()
+            return image
         }
     }
 }
