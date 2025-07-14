@@ -1,9 +1,19 @@
 #if os(macOS)
 import AVFoundation
 import Cocoa
+import ObjectiveC
+
+private var nsHeicCacheKey: UInt8 = 0
 
 extension NSImage {
+    /// Returns HEIC data for the image. Result is cached per compression quality
+    /// to reduce conversion overhead when snapshotting.
     func heicData(compressionQuality: CompressionQuality) -> Data? {
+        if let cache = objc_getAssociatedObject(self, &nsHeicCacheKey) as? [NSNumber: Data],
+           let data = cache[NSNumber(value: Float(compressionQuality.rawValue))] {
+            return data
+        }
+
         let data = NSMutableData()
 
         guard let imageDestination = CGImageDestinationCreateWithData(
@@ -24,7 +34,13 @@ extension NSImage {
 
         guard CGImageDestinationFinalize(imageDestination) else { return nil }
 
-        return data as Data
+        let result = data as Data
+
+        var cache = objc_getAssociatedObject(self, &nsHeicCacheKey) as? [NSNumber: Data] ?? [:]
+        cache[NSNumber(value: Float(compressionQuality.rawValue))] = result
+        objc_setAssociatedObject(self, &nsHeicCacheKey, cache, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+
+        return result
     }
 }
 #endif
